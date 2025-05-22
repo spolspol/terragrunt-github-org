@@ -1,0 +1,106 @@
+name: Terragrunt Apply on Merge
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'live/*/**'
+
+env:
+  tofu_version: '1.9.1'
+  tg_version: '0.79.0'
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed-dirs: ${{ steps.set-matrix.outputs.changed-dirs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed directories
+        id: set-matrix
+        run: |
+          # Get all changes in live directory
+          files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E '^live/.+/.+/.+' || true)
+          
+          if [ -z "$files" ]; then
+            echo "changed-dirs=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Filter out changes directly in repositories/ directory
+          files=$(echo "$files" | grep -v '^live/.+/repositories/[^/]*$' || true)
+          
+          # Get unique parent directories of changed files
+          changed_dirs=()
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              dir=$(dirname "$file")
+              # Check if directory exists in workspace and contains terragrunt.hcl
+              if [ -d "$dir" ] && [ -f "$dir/terragrunt.hcl" ]; then
+                changed_dirs+=("$dir")
+              fi
+            fi
+          done <<< "$files"
+          
+          # Remove duplicates and sort
+          if [ ${#changed_dirs[@]} -eq 0 ]; then
+            echo "changed-dirs=[]" >> $GITHUB_OUTPUT
+          else
+            # Sort and remove duplicates
+            IFS=$'\n' changed_dirs=($(sort -u <<< "${changed_dirs[*]}"))
+            unset IFS
+            
+            # Convert to JSON array with proper quoting
+            json_array="["
+            for dir in "${changed_dirs[@]}"; do
+              if [ "$json_array" != "[" ]; then
+                json_array="$json_array,"
+              fi
+              json_array="$json_array\"$dir\""
+            done
+            json_array="$json_array]"
+            
+            echo "changed-dirs=$json_array" >> $GITHUB_OUTPUT
+          fi
+
+  terragrunt-apply:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.changed-dirs != '[]'
+    strategy:
+      matrix:
+        dir: ${{ fromJson(needs.detect-changes.outputs.changed-dirs) }}
+      fail-fast: false
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    env:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Terraform Plugin Cache Dir
+        run: mkdir -p $TF_PLUGIN_CACHE_DIR
+
+      - name: Terraform Plugin Cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-terraform-plugin-cache-${{ hashFiles('**/.terraform.lock.hcl') }}
+
+      - name: Terragrunt Apply
+        uses: gruntwork-io/terragrunt-action@v2
+        with:
+          tofu_version: ${{ env.tofu_version }}
+          tg_version: ${{ env.tg_version }}
+          tg_dir: ${{ matrix.dir }}
+          tg_command: 'apply' 
