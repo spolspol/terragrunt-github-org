@@ -1,38 +1,35 @@
 ### Workflow Status
 
-[![Terragrunt PR Workflow](https://github.com/example-org/terragrunt-github-org/actions/workflows/terragrunt-pr.yml/badge.svg)](https://github.com/example-org/terragrunt-github-org/actions/workflows/terragrunt-pr.yml)
-[![Terragrunt Apply Workflow](https://github.com/example-org/terragrunt-github-org/actions/workflows/terragrunt-apply.yml/badge.svg)](https://github.com/example-org/terragrunt-github-org/actions/workflows/terragrunt-apply.yml)
+[![Terragrunt PR Workflow](https://github.com/your-org/tg-github-org/actions/workflows/terragrunt-pr-orchestrator.yml/badge.svg)](https://github.com/your-org/tg-github-org/actions/workflows/terragrunt-pr-orchestrator.yml)
+[![Terragrunt Apply Workflow](https://github.com/your-org/tg-github-org/actions/workflows/terragrunt-apply-orchestrator.yml/badge.svg)](https://github.com/your-org/tg-github-org/actions/workflows/terragrunt-apply-orchestrator.yml)
 
-# GitHub Organization Management with Terragrunt and OpenTofu
+# GitHub Organization Management
 
-This repository provides a **Terragrunt** and **OpenTofu**-based scaffolding to manage GitHub Organizations, including org settings, members, teams, and repositories, using [Mineiros GitHub modules](https://github.com/mineiros-io).
-
-The infrastructure is managed using Terragrunt for configuration organization and OpenTofu as the underlying Infrastructure-as-Code engine. This combination provides a powerful, open-source solution for managing GitHub organizations at scale.
+This repository provides a **Terragrunt**-based scaffolding to manage your **GitHub Organization**, including org settings, members, teams, and repositories, using [Mineiros GitHub modules](https://github.com/mineiros-io).
 
 The scaffolding follows best practices from [Terragrunt Infrastructure Live Example](https://github.com/gruntwork-io/terragrunt-infrastructure-live-example).
 
 ## Table of Contents
 
-- [Workflow Status](#workflow-status)
-- [Features Overview](#features-overview)
-  - [Automated Organization Configuration](#automated-organization-configuration)
-  - [Advanced Security Controls](#advanced-security-controls)
-  - [Granular Access Management](#granular-access-management)
-  - [Repository Standardization](#repository-standardization)
-  - [Compliance and Governance](#compliance-and-governance)
-  - [Automated Workflows](#automated-workflows)
+- [Organization Profile](#organization-profile)
+- [Getting Started](#getting-started)
+- [Organization Settings](#organization-settings)
+  - [Member Management](#member-management)
+  - [Repository Permissions](#repository-permissions)
+  - [Security Settings](#security-settings)
+  - [Branch Protection Rules](#branch-protection-rules)
 - [Folder Structure](#folder-structure)
 - [How Configuration Works](#how-configuration-works)
 - [Creating New Resources Using Templates](#creating-new-resources-using-templates)
   - [Using Existing Resources as Templates](#using-existing-resources-as-templates)
   - [Key Points When Using Templates](#key-points-when-using-templates)
 - [Example Configurations](#example-configurations)
-  - [Organization Variables](#organization-variables-liveorg-nameorg-hcl)
-  - [Organization Settings](#organization-settings-liveorg-nameorg-settingsterragrunthcl)
-  - [Member Management](#member-management-liveorg-namemembersterragrunthcl)
-  - [Repository Configuration](#repository-configuration-liveorg-namerepositoriesexample-repoterragrunthcl)
-  - [Teams Configuration](#teams-configuration)
-- [Getting Started](#getting-started)
+  - [Root Backend and Provider](#root-backend-and-provider-liveroothcl)
+  - [Shared Variables](#shared-variables-livecommonhcl)
+  - [Organization Settings Example](#organization-settings-example-liveorg-nameorg-settingsterragrunthcl)
+  - [Member Management Example](#member-management-example-liveorg-namemembersterragrunthcl)
+  - [Repository Example](#repository-example-liveorg-namerepositoriesexample-repoterragrunthcl)
+  - [Teams Example](#teams-example-liveorg-nameteamsterragrunthcl)
 - [GitHub Actions Workflows](#github-actions-workflows)
   - [Workflow Behavior](#workflow-behavior)
   - [Available Workflows](#available-workflows)
@@ -40,53 +37,130 @@ The scaffolding follows best practices from [Terragrunt Infrastructure Live Exam
   - [Best Practices](#best-practices)
 - [References](#references)
 
-## Features Overview
+## Organization Profile
 
-This project provides comprehensive GitHub organization management through Infrastructure as Code, offering:
+Configure your organization profile in `live/org.hcl`:
 
-### Automated Organization Configuration
-- Complete organization profile management including name, description, and contact details
-- Hierarchical configuration inheritance for consistent settings across teams and repositories
-- Version-controlled organization settings for audit and compliance
+- **Name**: Your Organization Name
+- **Description**: Managed by Terragrunt with OpenTofu
+- **Company**: Your Company Name
+- **Location**: Your Location
+- **Website**: Your organization website
 
-### Advanced Security Controls
-- Automated security policy enforcement across repositories
-- Dependabot vulnerability scanning and alerts
-- Secret scanning with push protection
-- Dependency graph analysis
-- Advanced security features for all new repositories
+## Getting Started
 
-### Granular Access Management
-- Role-based access control through teams
-- Centralized member and admin management
-- Automated onboarding/offboarding workflows
-- Configurable repository permissions and visibility settings
+📋 **For detailed configuration instructions, see [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md)**
 
-### Repository Standardization
-- Consistent repository settings and configurations
-- Automated branch protection rules including:
-  - Required status checks
-  - Required reviews
-  - Signed commits
-  - Linear history enforcement
-- Standardized merge strategies and settings
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/your-org/tg-github-org.git
+   cd tg-github-org
+   ```
 
-### Compliance and Governance
-- Enforced commit message conventions
-- Required code owner reviews
-- Mandatory review thread resolution
-- Audit trails through Git history
-- Automated policy enforcement
+2. **Configure your organization settings:**
+   ```bash
+   # Edit organization configuration
+   vim live/org.hcl
+   
+   # Update with your organization details:
+   # - owner: your GitHub organization name
+   # - org_name: display name
+   # - org_description: organization description
+   # - company_name: your company name
+   # - website_url: your website
+   # - billing_email: admin email
+   ```
 
-### Automated Workflows
-- GitHub Actions-based automation for infrastructure changes
-- Automated PR validation and planning
-- Parallel processing of changes for efficient updates
-- Automated state management and locking
-- Change detection and targeted updates
-- Integration with organization-wide security policies
+3. **Set up commit signing (recommended):**
+   ```bash
+   # Configure GPG commit signing for enhanced security
+   # See docs/COMMIT_SIGNING.md for detailed instructions
+   ```
+   📋 **For detailed GPG setup instructions, see [docs/COMMIT_SIGNING.md](docs/COMMIT_SIGNING.md)**
 
-The infrastructure is managed through Terragrunt configurations, providing a scalable and maintainable approach to GitHub organization management. All settings are defined as code, enabling version control, peer review, and automated validation of changes.
+4. **Set up environment variables:**
+   ```bash
+   export ORG_GITHUB_TOKEN="your_github_token_here"
+   # Optional: Cloud credentials for state storage
+   export TF_GOOGLE_CREDENTIALS="path_to_service_account.json"
+   ```
+
+5. **Configure backend storage:**
+   ```bash
+   # Edit root.hcl to configure your state backend
+   vim root.hcl
+   
+   # Update the backend configuration with your storage details
+   ```
+
+6. **Initialize and apply organization settings:**
+   ```bash
+   # Start with organization settings
+   cd live/org
+   terragrunt init
+   terragrunt plan
+   terragrunt apply
+   
+   # Then members
+   cd ../members
+   terragrunt init && terragrunt apply
+   
+   # Then teams (example)
+   cd ../teams/admins
+   terragrunt init && terragrunt apply
+   
+   # Finally repositories (example)
+   cd ../../repositories/web-app
+   terragrunt init && terragrunt apply
+   ```
+
+7. **Use GitHub Actions for ongoing management:**
+   - Create pull requests for changes
+   - Review validation results in PR comments
+   - Merge to main for automatic deployment
+
+---
+
+## Organization Settings
+
+The organization is configured with the following settings:
+
+### Member Management
+- Centralized member management in `members/terragrunt.hcl`
+- All-members team with secret visibility
+- Admin team management
+- Blocked users list
+
+### Repository Permissions
+- Members can create repositories
+- Members can create private repositories
+- Public repository creation is restricted
+- Default repository permission is set to "read"
+
+### Security Settings
+- Advanced security features enabled for new repositories
+- Dependabot alerts enabled
+- Dependency graph enabled
+- Secret scanning enabled with push protection
+- Dependabot security updates disabled for new repositories
+
+### Branch Protection Rules
+- Required status checks for CI
+- Linear history required
+- Conventional commit format enforced:
+  - `feat:` - New features
+  - `fix:` - Bug fixes
+  - `docs:` - Documentation changes
+  - `style:` - Formatting changes
+  - `refactor:` - Code refactoring
+  - `test:` - Adding tests
+  - `chore:` - Maintenance tasks
+- Required code owner review
+- Required review thread resolution
+
+For detailed settings, please refer to the configuration in:
+- `live/org/terragrunt.hcl` - Organization-wide settings
+- `live/members/terragrunt.hcl` - Member management
 
 ---
 
@@ -95,24 +169,37 @@ The infrastructure is managed through Terragrunt configurations, providing a sca
 ```
 .
 ├── .github/                        # GitHub Actions workflows and templates
-├── live/                           # Terragrunt configuration root
-│   ├── common.hcl                  # Root-level shared variables
-│   ├── root.hcl                    # Root config: backend, provider
-│   └── <org-name>/                 # Organization-specific configuration
-│       ├── org.hcl                 # Organization-level shared variables
-│       ├── .gitignore              # Organization-specific gitignore
-│       ├── org-settings/           # Organization settings
-│       │   └── terragrunt.hcl      # Organization-wide settings
-│       ├── members/                # Member management
-│       │   └── terragrunt.hcl      # Member management configuration
-│       ├── teams/                  # Team management
-│       │   ├── teams.hcl           # Common team settings and variables
-│       │   └── example-team/       # Example team configuration
-│       │       └── terragrunt.hcl  # Team-specific settings
-│       └── repositories/           # Repository management
-│           ├── repos.hcl           # Repository-level shared variables
-│           └── <repo-name>/        # Individual repository configurations
-│               └── terragrunt.hcl  # Repository-specific settings
+│   └── workflows/                  # GitHub Actions workflow files
+│       ├── common-env.yml          # Centralized environment variables
+│       ├── terragrunt-pr-orchestrator.yml       # PR validation orchestrator
+│       ├── terragrunt-apply-orchestrator.yml    # Apply deployment orchestrator
+│       └── terragrunt-unified-reusable.yml      # Reusable workflow template
+├── _common/                        # Common configurations and templates
+│   ├── common.hcl                  # Module versions and shared settings
+│   └── templates/                  # Reusable templates
+│       ├── repository.hcl          # Repository template with type variants
+│       ├── team.hcl                # Team management template
+│       ├── members.hcl             # Members management template
+│       └── organization.hcl        # Organization settings template
+├── docs/                           # Project documentation
+│   └── ...                        # Additional documentation files
+├── live/                           # Live Terragrunt configurations
+│   ├── org.hcl                     # Organization-level shared variables
+│   ├── org/                        # Organization settings
+│   │   └── terragrunt.hcl          # Organization-wide settings
+│   ├── members/                    # Member management
+│   │   └── terragrunt.hcl          # Member management configuration
+│   ├── teams/                      # Team management (individual team folders)
+│   │   └── <team-name>/            # Additional teams as needed
+│   │       └── terragrunt.hcl      # Team configuration
+│   └── repositories/               # Repository management
+│       ├── repos.hcl               # Repository-level shared variables
+│       ├── <repo-name>/            # Individual repository configurations
+│       │   └── terragrunt.hcl      # Repository settings
+├── scripts/                        # Utility scripts
+│   ├── terragrunt-format.sh        # Pre-commit format script
+│   └── terragrunt-format-check.sh  # Pre-commit format check script
+├── root.hcl                        # Root configuration with backend and provider
 └── README.md                       # Project documentation
 ```
 
@@ -120,15 +207,33 @@ The infrastructure is managed through Terragrunt configurations, providing a sca
 
 ## How Configuration Works
 
-- **Shared Variables:**
-  - `live/common.hcl` and `live/<org-name>/org.hcl` provide shared variables (e.g., `ORG_GITHUB_TOKEN`, organization name) for all modules.
-  - Most repository configs use a `locals` block to load these shared variables and merge them into their `inputs`.
-- **Dynamic Naming:**
-  - Repository names are set dynamically using `${basename(get_terragrunt_dir())}` for consistency.
-- **Module Sources:**
-  - Organization: [mineiros-io/terraform-github-organization](https://github.com/mineiros-io/terraform-github-organization)
-  - Repositories: [mineiros-io/terraform-github-repository](https://github.com/mineiros-io/terraform-github-repository)
-  - Teams: [mineiros-io/terraform-github-team](https://github.com/mineiros-io/terraform-github-team)
+### Template-Based Architecture
+
+The configuration uses a sophisticated template system for consistency and maintainability:
+
+- **Common Configuration**: `_common/common.hcl` provides module versions and shared settings
+- **Template System**: `_common/templates/` contains reusable configuration patterns
+- **Hierarchical Configuration**: Each resource inherits from templates and overrides as needed
+
+### Configuration Hierarchy
+
+1. **Root Level**: `root.hcl` provides backend and provider configuration  
+2. **Common Level**: `_common/common.hcl` provides module versions and shared settings
+3. **Organization Level**: `live/org.hcl` provides organization-wide variables
+4. **Resource Level**: Individual `terragrunt.hcl` files inherit and merge all parent settings
+
+### Key Features
+
+- **Dynamic Naming**: Repository names automatically derived from directory names using `basename(get_terragrunt_dir())`
+- **Template Inheritance**: Resources use templates from `_common/templates/` for consistent configuration
+- **Unified Settings**: Production/non-production split removed in favor of unified organization-grade settings
+- **Module Versions**: Centrally managed in `_common/common.hcl`
+
+### Core Modules
+
+- **Organization**: [mineiros-io/terraform-github-organization](https://github.com/mineiros-io/terraform-github-organization) v0.9.0
+- **Repositories**: [mineiros-io/terraform-github-repository](https://github.com/mineiros-io/terraform-github-repository) v0.18.0 (or enhanced fork with environment support)
+- **Teams**: [mineiros-io/terraform-github-team](https://github.com/mineiros-io/terraform-github-team) v0.9.0
 
 ---
 
@@ -139,13 +244,26 @@ The infrastructure is managed through Terragrunt configurations, providing a sca
 1. **Creating a New Repository:**
    ```bash
    # Navigate to the repositories directory
-   cd live/<org-name>/repositories
+   cd live/repositories
    
    # Copy an existing repository folder as a template
-   cp -r example-repo new-repo-name
+   cp -r web-app new-repo-name
    
    # Edit the new repository's configuration
    cd new-repo-name
+   vim terragrunt.hcl
+   ```
+
+2. **Creating a New Team:**
+   ```bash
+   # Navigate to the teams directory
+   cd live/teams
+   
+   # Copy an existing team as a template
+   cp -r admins new-team-name
+   
+   # Edit the new team's configuration
+   cd new-team-name
    vim terragrunt.hcl
    ```
 
@@ -159,189 +277,120 @@ The infrastructure is managed through Terragrunt configurations, providing a sca
 
 ## Example Configurations
 
-### Root Backend and Provider (`live/root.hcl`)
-
-By default, this template uses a local backend for state storage. However, for production environments, it's recommended to use a remote backend like AWS S3 or Google Cloud Storage. Here are examples for different backend configurations:
-
-#### Local Backend (Default)
+### Root Configuration (`root.hcl`)
 ```hcl
-generate "backend" {
-  path      = "backend.tf"
-  if_exists = "overwrite"
-  contents  = <<EOF
-terraform {
-  backend "local" {
-    path = "${get_terragrunt_dir()}/terraform.tfstate"
-  }
+locals {
+  # Read organization variables
+  org_vars = read_terragrunt_config(find_in_parent_folders("live/org.hcl"))
 }
-EOF
-}
-```
 
-#### Google Cloud Storage Backend
-```hcl
+# Backend configuration for GCS
 generate "backend" {
   path      = "backend.tf"
   if_exists = "overwrite"
   contents  = <<EOF
 terraform {
   backend "gcs" {
-    bucket   = get_env("TF_STATE_BUCKET")
-    prefix   = "github-org/${path_relative_to_include()}/terraform.tfstate"
-    project  = "your-gcp-project"
+    bucket = "your-terraform-state-bucket"
+    prefix = "github-org/${path_relative_to_include()}/terraform.tfstate"
   }
 }
 EOF
 }
-```
 
-Required environment variables for GCS:
-- `TF_STATE_BUCKET`: Your GCS bucket name
-- `GOOGLE_CREDENTIALS`: Path to your GCP service account key file
-
-#### AWS S3 Backend
-```hcl
-generate "backend" {
-  path      = "backend.tf"
-  if_exists = "overwrite"
-  contents  = <<EOF
-terraform {
-  backend "s3" {
-    bucket         = "your-terraform-state-bucket"
-    key            = "github-org/${path_relative_to_include()}/terraform.tfstate"
-    region         = "us-west-2"  # Change to your desired region
-    encrypt        = true
-    dynamodb_table = "terraform-lock-table"  # Optional: for state locking
-  }
-}
-EOF
-}
-```
-
-Required environment variables for AWS:
-- `AWS_ACCESS_KEY_ID`: Your AWS access key
-- `AWS_SECRET_ACCESS_KEY`: Your AWS secret key
-- `AWS_REGION`: Your AWS region (if different from the one in configuration)
-
-### Provider Configuration
-```hcl
+# Provider configuration with dynamic values
 generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite"
   contents  = <<EOF
 provider "github" {
-  owner = "<your-org-name>"
+  owner = "${local.org_vars.locals.owner}"
+  token = "${local.org_vars.locals.github_token}"
 }
 EOF
 }
 ```
 
-### Organization Variables (`live/<org-name>/org.hcl`)
+### Organization Variables (`live/org.hcl`)
 ```hcl
 locals {
-  # Organization settings
-  org_name        = get_env("GITHUB_OWNER")
-  org_description = "Managed by Terragrunt"
-  org_website     = "https://example.com"
-  org_location    = "Global"
-  org_email       = "admin@example.com"
+  # Organization configuration
+  owner         = "your-organization"
+  github_token  = get_env("ORG_GITHUB_TOKEN")
   
-  # Default repository settings
-  default_repo_visibility = "private"
-  default_repo_topics     = ["managed-by-terragrunt"]
-  
-  # Default branch protection settings
-  branch_protection = {
-    required_status_checks = true
-    enforce_admins        = true
-    required_reviews      = 1
-    dismiss_stale_reviews = true
+  # Common labels for all resources
+  common_labels = {
+    terraform_managed = "true"
+    repository        = "tg-github-org"
+    organization      = "your-organization"
   }
 }
 ```
 
-### Organization Settings (`live/<org-name>/org-settings/terragrunt.hcl`)
+### Organization Settings Example (`live/org/terragrunt.hcl`)
 ```hcl
-include {
+include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-locals {
-  common_vars = read_terragrunt_config(find_in_parent_folders("common.hcl"))
-  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
-  
-  # Get organization name from parent folder
-  org_name = basename(dirname(get_terragrunt_dir()))
+include "organization" {
+  path = "${get_terragrunt_dir()}/../../_common/templates/organization.hcl"
 }
 
-terraform {
-  source = "github.com/vmvarela/terraform-github-org?ref=v0.2.0"
+locals {
+  common_vars = read_terragrunt_config(find_in_parent_folders("_common/common.hcl"))
+  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
 }
 
 inputs = merge(
-  local.common_vars.locals,
-  local.org_vars.locals,
+  local.common_vars.locals.common_labels,
+  local.org_vars.locals.common_labels,
   {
-    settings = {
-      billing_email = local.org_vars.locals.org_email
-      name          = local.org_name
-      description   = "${local.org_name} organization managed by Terragrunt"
-      blog          = local.org_vars.locals.org_website
-      location      = local.org_vars.locals.org_location
-      
-      # Repository permissions
-      default_repository_permission = "read"
-      members_can_create_repositories = true
-      members_can_create_private_repositories = true
-      members_can_create_public_repositories = false
-      
-      # Security settings
-      web_commit_signoff_required = true
-      advanced_security_enabled_for_new_repositories = true
-      dependabot_alerts_enabled_for_new_repositories = true
-      dependency_graph_enabled_for_new_repositories = true
-      secret_scanning_enabled_for_new_repositories = true
-      secret_scanning_push_protection_enabled_for_new_repositories = true
-    }
+    # Organization settings from template with overrides
+    billing_email = "admin@your-organization.com"
+    name          = "Your Organization"
+    description   = "Managed by Terragrunt with OpenTofu"
+    company       = "Your Company Ltd"
+    location      = "Your Location"
+    blog          = "https://your-organization.com/"
   }
 )
 ```
 
-### Member Management (`live/<org-name>/members/terragrunt.hcl`)
+### Member Management Example (`live/members/terragrunt.hcl`)
 ```hcl
-include {
+include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-locals {
-  common_vars = read_terragrunt_config(find_in_parent_folders("common.hcl"))
-  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
-  
-  # Get organization name from parent folder
-  org_name = basename(dirname(get_terragrunt_dir()))
+include "members" {
+  path = "${get_terragrunt_dir()}/../../_common/templates/members.hcl"
 }
 
-terraform {
-  source = "github.com/mineiros-io/terraform-github-organization?ref=v0.9.0"
+locals {
+  common_vars = read_terragrunt_config(find_in_parent_folders("_common/common.hcl"))
+  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
 }
 
 inputs = merge(
-  local.common_vars.locals,
-  local.org_vars.locals,
+  local.common_vars.locals.common_labels,
+  local.org_vars.locals.common_labels,
   {
-    # Member management - Replace with actual members
+    # Member management
     members = [
-      "example-member-1",
-      "example-member-2"
+      "user1",
+      "user2",
+      "user3"
     ]
 
-    # Organization Admins - Replace with actual admins
+    # Organization Admins
     admins = [
-      "example-admin-1"
+      "admin-user1", 
+      "admin-user2"
     ]
 
-    # All Members Team
-    all_members_team_name       = "${local.org_name}-all-members"
+    # All Members Team configuration
+    all_members_team_name       = "all-members"
     all_members_team_visibility = "secret"
     catch_non_existing_members  = false
 
@@ -351,202 +400,214 @@ inputs = merge(
 )
 ```
 
-### Repository Configuration (`live/<org-name>/repositories/example-repo/terragrunt.hcl`)
+### Repository Example (`live/repositories/<repo-name>/terragrunt.hcl`)
+
+The repository configuration uses a template-based pattern with hierarchical configuration:
+- **Template inheritance** from `_common/templates/repository.hcl`
+- **Shared repository settings** from `repos.hcl`
+- **Repository-specific overrides** in individual `terragrunt.hcl` files
+- **Automatic naming** from directory name
+
+**Example Configuration:**
+
+`live/repositories/<repo-name>/terragrunt.hcl`:
 ```hcl
-include {
+include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
+include "repository" {
+  path = "${get_terragrunt_dir()}/../../../_common/templates/repository.hcl"
+}
+
 locals {
-  common_vars = read_terragrunt_config(find_in_parent_folders("common.hcl"))
-  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
-  repos_vars  = read_terragrunt_config(find_in_parent_folders("repos.hcl"))
-  
-  # Get repository name from folder structure
+  common_vars     = read_terragrunt_config(find_in_parent_folders("_common/common.hcl"))
+  org_vars        = read_terragrunt_config(find_in_parent_folders("org.hcl"))
+  repo_vars       = read_terragrunt_config(find_in_parent_folders("repos.hcl"))
   repository_name = basename(get_terragrunt_dir())
 }
 
-terraform {
-  source = "github.com/mineiros-io/terraform-github-repository?ref=v0.18.0"
-}
-
 inputs = merge(
-  local.common_vars.locals,
-  local.org_vars.locals,
-  local.repos_vars.locals,
+  local.common_vars.locals.common_labels,
+  local.org_vars.locals.common_labels,
+  local.repo_vars.locals.default_repository_settings,
   {
     name        = local.repository_name
-    description = "${local.repository_name} repository managed by Terragrunt"
-    visibility  = local.org_vars.locals.default_repo_visibility
-    topics      = local.org_vars.locals.default_repo_topics
-
-    # Features from repos.hcl
-    has_issues    = local.repos_vars.locals.default_features.has_issues
-    has_projects  = local.repos_vars.locals.default_features.has_projects
-    has_wiki      = local.repos_vars.locals.default_features.has_wiki
-    has_downloads = local.repos_vars.locals.default_features.has_downloads
-
-    # Merge settings from repos.hcl
-    allow_merge_commit = local.repos_vars.locals.default_merge_settings.allow_merge_commit
-    allow_rebase_merge = local.repos_vars.locals.default_merge_settings.allow_rebase_merge
-    allow_squash_merge = local.repos_vars.locals.default_merge_settings.allow_squash_merge
-
-    # Branch protection from repos.hcl
-    branch_protections = [
+    description = "Application repository with custom configuration"
+    topics      = ["your-organization", "managed-by-terragrunt", "application"]
+    
+    # Team access (using template defaults with overrides)
+    push_teams     = ["developers", "devops"]
+    maintain_teams = ["lead-developers"]
+    
+    # Repository type configuration
+    gitignore_template = "Node"
+    
+    # Branch protection (inherits from template)
+    branch_protections_v4 = [
       {
-        branch                 = local.repos_vars.locals.default_branch
-        enforce_admins        = local.repos_vars.locals.default_branch_protection.enforce_admins
-        require_signed_commits = local.repos_vars.locals.default_branch_protection.require_signed_commits
-        required_status_checks = local.repos_vars.locals.default_branch_protection.required_status_checks
-        required_pull_request_reviews = local.repos_vars.locals.default_branch_protection.required_pull_request_reviews
-      }
-    ]
-
-    # Example collaborators - Replace with actual users
-    collaborators = [
-      {
-        username   = "example-member-1"
-        permission = "push"
-      },
-      {
-        username   = "example-member-2"
-        permission = "maintain"
+        pattern                         = "main"
+        required_pull_request_reviews = {
+          required_approving_review_count = 2  # Override template default
+        }
       }
     ]
   }
 )
 ```
 
-Key features of the configuration:
-1. All configurations use `merge` to combine settings from multiple sources
-2. Dynamic naming using `basename` functions
-3. Hierarchical configuration with shared variables
-4. Consistent use of latest module versions
-5. Clear separation of concerns between different configuration files
-6. Extensive use of defaults and inheritance for consistent settings
+### Teams Example (`live/teams/<team-name>/terragrunt.hcl`)
 
-### Teams Example (`live/<org-name>/teams/example-team/terragrunt.hcl`)
+Teams are now managed individually with each team having its own directory:
+
 ```hcl
-include {
+include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-locals {
-  common_vars = read_terragrunt_config(find_in_parent_folders("common.hcl"))
-  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
-  team_vars   = read_terragrunt_config(find_in_parent_folders("teams.hcl"))
+include "team" {
+  path = "${get_terragrunt_dir()}/../../../_common/templates/team.hcl"
 }
 
-terraform {
-  source = "github.com/mineiros-io/terraform-github-team?ref=v0.9.0"
+locals {
+  common_vars = read_terragrunt_config(find_in_parent_folders("_common/common.hcl"))
+  org_vars    = read_terragrunt_config(find_in_parent_folders("org.hcl"))
+  team_name   = basename(get_terragrunt_dir())
 }
 
 inputs = merge(
-  local.common_vars.inputs,
-  local.team_vars.inputs.team_settings,
+  local.common_vars.locals.common_labels,
+  local.org_vars.locals.common_labels,
   {
-    name        = "${basename(get_terragrunt_dir())}"
-    description = "Example Team"
-    members     = []
-    maintainers = []
+    name        = local.team_name
+    description = "Development Team"
+    privacy     = "closed"
+    
+    # Team members and maintainers
+    members     = ["developer1", "developer2", "developer3"]
+    maintainers = ["tech-lead"]
+    
+    # Repository permissions
+    repositories = [
+      {
+        name       = "web-app"
+        permission = "push"
+      },
+      {
+        name       = "api-service"
+        permission = "push"
+      }
+    ]
   }
 )
 ```
 
-### Common Team Settings (`live/<org-name>/teams/teams.hcl`)
-```hcl
-locals {
-  # Common variables for all teams
-  common_team_settings = {
-    privacy = "closed"  # Default privacy setting for all teams
-    
-    # Default team permissions
-    base_permissions = "pull"  # Read-only access by default
-    
-    # Common maintainers across all teams (optional)
-    default_maintainers = []
-    
-    # Common team settings
-    create_default_maintainer = false
-    parent_team_id           = null
-  }
-}
-
-# Export the common team settings to be used by child terragrunt configurations
-inputs = {
-  team_settings = local.common_team_settings
-}
-```
-
-The teams configuration follows a hierarchical structure where:
-1. Common settings are defined in `teams.hcl`
-2. Each team inherits these settings through the `team_vars` local variable
-3. Team-specific settings can override or extend the common settings
-4. Team name is automatically set from the directory name using `${basename(get_terragrunt_dir())}`
-
----
-
-## Getting Started
-
-1. Clone this repository
-2. Set up required environment variables:
-   ```bash
-   export ORG_GITHUB_TOKEN="your-github-token"
-   ```
-3. Initialize and apply the Terragrunt configurations:
-   ```bash
-   cd live/<org-name>
-   terragrunt run-all init
-   terragrunt run-all plan
-   terragrunt run-all apply
-   ```
+**Example Teams Structure:**
+- `live/teams/admins/` - Organization administrators
+- `live/teams/developers/` - Application developers
+- `live/teams/devops/` - DevOps and infrastructure team  
+- `live/teams/data-team/` - Data and analytics team
 
 ---
 
 ## GitHub Actions Workflows
 
-This repository includes two GitHub Actions workflows for managing Terragrunt operations:
+This repository uses an advanced orchestrated workflow system for managing GitHub organization infrastructure:
 
-### Workflow Behavior
+### Workflow Architecture
 
-1. **Change Detection:**
-   - Workflows only trigger on changes in `live/<org-name>/` directory
-   - Changes must be at least one level deep (e.g., `live/<org-name>/members/...`)
+The system uses a **unified reusable workflow** pattern with **orchestrator workflows** that manage multiple resource types in proper dependency order:
 
-2. **Matrix Strategy:**
-   - Changes in multiple directories are processed in parallel
-   - If one directory fails, other directories continue processing (`fail-fast: false`)
-   - Removed directories are automatically excluded from processing
+1. **Resource Dependencies:** Organization Settings → Members → Teams → Repositories
+2. **Parallel Execution:** Resources are processed in parallel within dependency constraints
+3. **Failure Handling:** Early failure detection prevents cascading issues
+4. **Manual Execution:** Apply workflow supports manual execution with resource targeting
 
 ### Available Workflows
 
-1. **Terragrunt PR Checks** (`.github/workflows/terragrunt-pr.yml`):
-   - Runs on pull requests
-   - Performs formatting checks
-   - Generates and comments Terragrunt plans
-   - Helps review infrastructure changes before merging
+1. **PR Orchestrator** (`.github/workflows/terragrunt-pr-orchestrator.yml`):
+   - Triggers on pull requests affecting `live/**`, `_common/**`, or `root.hcl`
+   - Validates all affected resources in dependency order
+   - Posts detailed validation results as PR comments
+   - Two-step validation: Format Check (blocking) → Plan Validation
 
-2. **Terragrunt Apply** (`.github/workflows/terragrunt-apply.yml`):
-   - Runs on merges to main branch
-   - Applies approved changes automatically
-   - Processes changes in parallel for efficiency
+2. **Apply Orchestrator** (`.github/workflows/terragrunt-apply-orchestrator.yml`):
+   - Triggers on pushes to main branch
+   - **Manual execution supported** with resource targeting options:
+     - `auto-detect` (default) - Detects changes automatically
+     - `org-settings` - Apply only organization settings  
+     - `members` - Apply only member management
+     - `teams` - Apply only team management
+     - `repositories` - Apply only repository management
+     - `all` - Apply all resources
+   - Deploys changes in dependency order with comprehensive reporting
+
+3. **Unified Reusable Workflow** (`.github/workflows/terragrunt-unified-reusable.yml`):
+   - Shared workflow used by orchestrators
+   - Handles both validation and apply operations
+   - Matrix strategy for parallel resource processing
+   - Integrated error handling and reporting
+
+### Centralized Environment Management
+
+All workflows use centralized environment variables from `.github/workflows/common-env.yml`:
+
+- **Terragrunt Version**: 0.80.4
+- **OpenTofu Version**: 1.10.0-beta2  
+- **Experimental Features**: Enabled for enhanced CLI experience
+- **Cloud Integration**: Project and region configuration (configurable for your cloud provider)
 
 ### Workflow Requirements
 
 - `ORG_GITHUB_TOKEN`: GitHub token with organization admin permissions
-- Backend-specific credentials (choose one based on your backend):
-  - Local: No additional credentials needed
-  - GCS: `GOOGLE_CREDENTIALS` for Google Cloud credentials
-  - AWS: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for AWS credentials
-- Terragrunt version: 0.79.0
-- OpenTofu version: 1.9.1
+- Backend credentials: Configure based on your chosen backend (GCS, S3, Azure, etc.)
+- **Environment Protection**: Production deployments require manual approval
+
+### Workflow Customization
+
+The workflows are designed to be generic and work with any organization. Key customization points:
+
+- **Cloud Configuration**: Update `GCP_PROJECT_ID` and `GCP_REGION` in `.github/workflows/common-env.yml`
+- **Tool Versions**: Centrally managed in `common-env.yml` for consistency
+- **Environment Protection**: Configure `approval-required` environment in repository settings
+- **Backend Integration**: Supports GCS, S3, and Azure backends with appropriate authentication
+
+📋 **For detailed workflow configuration, see [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md#workflow-configuration)**
 
 ### Best Practices
 
-1. **Making Changes:**
-   - Always create a new branch for changes
-   - Make changes in the appropriate subdirectory
-   - Test changes using the PR workflow before merging
+1. **Working with Repositories**
+
+   - **Security & Authentication:**
+     - **Set up GPG commit signing** for verified commits (see [docs/COMMIT_SIGNING.md](docs/COMMIT_SIGNING.md))
+     - Use strong authentication methods for GitHub access
+     - Follow the principle of least privilege for repository permissions
+
+   - **Branching:**
+     - Always create a new branch for each change, using a descriptive name (e.g., `feature/xyz`, `fix/bug-123`, `hotfix/security-patch`).
+     - Keep branches focused on a single purpose or feature.
+
+   - **Making Changes:**
+     - Make changes in the appropriate subdirectory for the repository or resource.
+     - Use existing configurations as templates when adding new resources.
+     - Follow established naming conventions for files and branches.
+
+   - **Pull Request (PR) Approval Process:**
+     1. **Open a Pull Request:**
+        - Push your branch to the remote repository and open a PR against the `main` branch.
+        - Provide a clear title and description of the changes.
+     2. **Automated Checks:**
+        - The PR workflow will run automated checks (formatting, Terragrunt plan, etc.).
+        - Ensure all status checks pass before requesting review.
+     3. **Code Review:**
+        - At least one team member (or a required number, as set in branch protection rules) must review and approve the PR.
+        - Address any feedback or requested changes.
+     4. **Approval and Merge:**
+        - Once approved and all checks pass, the PR can be merged into `main`.
+        - Use "Squash and merge" or "Rebase and merge" as preferred by your team.
+     5. **Post-Merge:**
+        - The apply workflow will run to apply the approved changes to the infrastructure.
+        - Monitor the workflow for successful execution.
 
 2. **Directory Structure:**
    - Keep changes organized in their respective directories
@@ -562,8 +623,7 @@ This repository includes two GitHub Actions workflows for managing Terragrunt op
 
 ## References
 - [Terragrunt Infrastructure Live Example](https://github.com/gruntwork-io/terragrunt-infrastructure-live-example)
-- [OpenTofu](https://github.com/opentofu/opentofu)
+- [Mineiros GitHub Organization Module](https://github.com/mineiros-io/terraform-github-organization)
 - [Mineiros GitHub Team Module](https://github.com/mineiros-io/terraform-github-team)
 - [Mineiros GitHub Repository Module](https://github.com/mineiros-io/terraform-github-repository)
-- [Mineiros GitHub Teams Module](https://github.com/mineiros-io/terraform-github-teams)
 - [gruntwork-io/terragrunt-action (GitHub Action)](https://github.com/gruntwork-io/terragrunt-action)

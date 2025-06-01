@@ -1,0 +1,337 @@
+name: Terragrunt Unified (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'Operation mode: validate or apply'
+        required: true
+        type: string
+      resource_type:
+        description: 'Resource type being processed'
+        required: true
+        type: string
+      resource_paths:
+        description: 'JSON array of resource paths to process'
+        required: true
+        type: string
+      resource_emoji:
+        description: 'Emoji for resource type'
+        required: true
+        type: string
+      requires_approval:
+        description: 'Whether this operation requires approval'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ORG_GITHUB_TOKEN:
+        required: true
+      TF_GOOGLE_CREDENTIALS:
+        required: false
+    outputs:
+      operation_status:
+        description: 'Status of the operation'
+        value: ${{ jobs.execute-operation.outputs.status }}
+      has_changes:
+        description: 'Whether there were changes to apply'
+        value: ${{ jobs.execute-operation.outputs.has_changes }}
+      changed_resources:
+        description: 'List of resources that changed'
+        value: ${{ jobs.execute-operation.outputs.changed_resources }}
+
+jobs:
+  get-env:
+    name: 📋 Set ENV
+    uses: ./.github/workflows/common-env.yml
+
+
+  execute-operation:
+    name: "${{ inputs.resource_emoji }} ${{ inputs.mode == 'validate' && 'Validate' || 'Apply' }}: ${{ matrix.resource_path }}"
+
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.requires_approval && 'approval-required' || null }}
+    needs: [get-env]
+    env:
+      TERRAGRUNT_VERSION: ${{ needs.get-env.outputs.terragrunt_version }}
+      TOFU_VERSION: ${{ needs.get-env.outputs.tofu_version }}
+      TG_EXPERIMENT_MODE: ${{ needs.get-env.outputs.tg_experiment_mode }}
+      GCP_PROJECT_ID: ${{ needs.get-env.outputs.gcp_project_id }}
+      GCP_REGION: ${{ needs.get-env.outputs.gcp_region }}
+    outputs:
+      status: ${{ steps.operation.outputs.status }}
+      has_changes: ${{ steps.operation.outputs.has_changes }}
+      changed_resources: ${{ steps.operation.outputs.changed_resources }}
+    strategy:
+      matrix:
+        resource_path: ${{ fromJson(inputs.resource_paths) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract resource name
+        id: extract-name
+        run: |
+          # Extract the last folder name from the path
+          RESOURCE_NAME=$(basename "${{ matrix.resource_path }}")
+          echo "resource_name=$RESOURCE_NAME" >> $GITHUB_OUTPUT
+          echo "Resource name extracted: $RESOURCE_NAME"
+
+
+      - name: Cache Terragrunt and OpenTofu binaries
+        id: cache-binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/bin/terragrunt
+            ~/.local/bin/tofu
+          key: terragrunt-${{ env.TERRAGRUNT_VERSION }}-tofu-${{ env.TOFU_VERSION }}-${{ runner.os }}
+
+      - name: Setup Terragrunt and OpenTofu
+        if: steps.cache-binaries.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+
+          # Install Terragrunt
+          echo "Installing Terragrunt ${{ env.TERRAGRUNT_VERSION }}..."
+          wget -O ~/.local/bin/terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${{ env.TERRAGRUNT_VERSION }}/terragrunt_linux_amd64
+          chmod +x ~/.local/bin/terragrunt
+
+          # Install OpenTofu
+          echo "Installing OpenTofu ${{ env.TOFU_VERSION }}..."
+          wget -O tofu.tar.gz https://github.com/opentofu/opentofu/releases/download/v${{ env.TOFU_VERSION }}/tofu_${{ env.TOFU_VERSION }}_linux_amd64.tar.gz
+          tar -xzf tofu.tar.gz
+          chmod +x tofu
+          mv tofu ~/.local/bin/
+          rm tofu.tar.gz
+
+      - name: Add binaries to PATH and verify
+        run: |
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "Terragrunt version:"
+          terragrunt --version
+          echo "OpenTofu version:"
+          tofu --version
+          echo "Environment variables:"
+          echo "  TG_EXPERIMENT_MODE=$TG_EXPERIMENT_MODE"
+          echo "  GCP_PROJECT_ID=$GCP_PROJECT_ID"
+          echo "  GCP_REGION=$GCP_REGION"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+        continue-on-error: true
+
+      - name: "${{ inputs.resource_emoji }} ${{ inputs.mode == 'validate' && 'Format Check' || 'Apply' }}: ${{ steps.extract-name.outputs.resource_name }}"
+        id: format-validation
+        working-directory: ${{ matrix.resource_path }}
+        env:
+          ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+          TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+        run: |
+          set -e
+
+          echo "🔍 Processing ${{ inputs.resource_type }} in ${{ matrix.resource_path }}"
+
+          # Verify experimental mode is enabled
+          echo "Verifying Terragrunt experimental mode..."
+          if [ "${TG_EXPERIMENT_MODE:-}" == "true" ]; then
+            echo "  TG_EXPERIMENT_MODE=${TG_EXPERIMENT_MODE:-}"
+          else
+            echo "⚠️  Warning: TG_EXPERIMENT_MODE not set to true"
+          fi
+
+          # Check for terragrunt.hcl in current directory
+          if [ ! -f "terragrunt.hcl" ]; then
+            echo "❌ Error: terragrunt.hcl not found in current directory"
+            echo "Current directory: $(pwd)"
+            echo "Files in directory:"
+            ls -la
+            exit 1
+          fi
+
+          # Validate HCL syntax using new CLI
+          echo "🔍 Validating HCL syntax..."
+          terragrunt hcl validate
+
+          # Validate inputs using new CLI
+          echo "🔍 Validating HCL inputs..."
+          terragrunt hcl validate --inputs
+
+          if [ "${{ inputs.mode }}" = "validate" ]; then
+            # BLOCKING FORMAT CHECK - This step will fail the workflow if formatting issues are detected
+            echo "🎨 Checking HCL formatting (BLOCKING)..."
+            terragrunt hcl format --check --diff
+            echo "✅ Format validation passed"
+            echo "format_status=success" >> $GITHUB_OUTPUT
+          else
+            # For apply mode, run the full apply operation
+            echo "Initializing Terragrunt with experimental CLI..."
+            terragrunt init
+
+            echo "Running Terragrunt apply..."
+            terragrunt apply -- -auto-approve -compact-warnings -no-color
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ Apply completed successfully"
+            echo "changed_resources=${{ matrix.resource_path }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "${{ inputs.resource_emoji }} Plan Validation: ${{ steps.extract-name.outputs.resource_name }}"
+        id: plan-validation
+        if: inputs.mode == 'validate' && steps.format-validation.outputs.format_status == 'success'
+        working-directory: ${{ matrix.resource_path }}
+        env:
+          ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+          TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+        run: |
+          set -e
+
+          echo "🚀 Starting plan validation after successful format check..."
+
+          # Initialize using experimental CLI
+          echo "Initializing Terragrunt with experimental CLI..."
+          terragrunt init
+
+          # Run plan for validation using experimental CLI
+          echo "Running Terragrunt plan..."
+          set +e  # Don't exit on non-zero exit codes
+          terragrunt plan -- -detailed-exitcode -compact-warnings -no-color
+          plan_exit_code=$?
+          set -e  # Re-enable exit on error
+
+          echo "Plan exit code: $plan_exit_code"
+
+          if [ $plan_exit_code -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "✅ No changes detected"
+          elif [ $plan_exit_code -eq 2 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📋 Changes detected but validation successful"
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "has_changes=unknown" >> $GITHUB_OUTPUT
+            echo "❌ Plan failed with exit code: $plan_exit_code"
+            exit 1
+          fi
+
+          echo "changed_resources=${{ matrix.resource_path }}" >> $GITHUB_OUTPUT
+
+      - name: Set operation outputs
+        id: operation
+        if: always()
+        run: |
+          if [ "${{ inputs.mode }}" = "validate" ]; then
+            # For validate mode, use plan-validation outputs if available, otherwise format-validation
+            if [ "${{ steps.plan-validation.outcome }}" != "" ]; then
+              echo "status=${{ steps.plan-validation.outputs.status }}" >> $GITHUB_OUTPUT
+              echo "has_changes=${{ steps.plan-validation.outputs.has_changes }}" >> $GITHUB_OUTPUT
+              echo "changed_resources=${{ steps.plan-validation.outputs.changed_resources }}" >> $GITHUB_OUTPUT
+            elif [ "${{ steps.format-validation.outputs.format_status }}" == "success" ]; then
+              echo "status=success" >> $GITHUB_OUTPUT
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+              echo "changed_resources=${{ matrix.resource_path }}" >> $GITHUB_OUTPUT
+            else
+              echo "status=failure" >> $GITHUB_OUTPUT
+              echo "has_changes=unknown" >> $GITHUB_OUTPUT
+              echo "changed_resources=${{ matrix.resource_path }}" >> $GITHUB_OUTPUT
+            fi
+          else
+            # For apply mode, use format-validation outputs
+            echo "status=${{ steps.format-validation.outputs.status }}" >> $GITHUB_OUTPUT
+            echo "has_changes=${{ steps.format-validation.outputs.has_changes }}" >> $GITHUB_OUTPUT
+            echo "changed_resources=${{ steps.format-validation.outputs.changed_resources }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post Summary
+        if: inputs.mode == 'validate' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const resourcePath = '${{ matrix.resource_path }}';
+            const displayPath = resourcePath.replace(/^live\//, '');
+            const resourceType = '${{ inputs.resource_type }}';
+            const resourceDisplayName = '${{ steps.extract-name.outputs.resource_name }}';
+            const status = '${{ steps.operation.outputs.status }}';
+            const hasChanges = '${{ steps.operation.outputs.has_changes }}';
+
+            const statusEmoji = status === 'success' ? '✅' : '❌';
+            const changesText = hasChanges === 'true' ? ' (changes detected)' : ' (no changes)';
+
+            const actionTitle = '${{ inputs.mode }}' === 'validate' ? 'Validation' : 'Apply';
+            const statusIcon = status === 'success' ? '🟢' : '🔴';
+            const statusText = status === 'success' ?
+              `**Status: ${actionTitle.toUpperCase()} PASSED** ✅` :
+              `**Status: ${actionTitle.toUpperCase()} FAILED** ❌`;
+
+            // More robust comment matching - look for unique identifier
+            const commentIdentifier = `<!-- TERRAGRUNT-${resourceType.toUpperCase()}-${resourceDisplayName.toUpperCase()}-${actionTitle.toUpperCase()} -->`;
+
+            const commentBody = `${commentIdentifier}\n${{ inputs.resource_emoji }} **${resourceDisplayName} ${actionTitle} Results**\n\n` +
+              `${statusIcon} ${statusText}\n\n` +
+              `**Resource Type:** ${resourceType}\n` +
+              `**Operation:** ${actionTitle}${hasChanges === 'true' ? ' (changes detected)' : ' (no changes)'}\n` +
+              `**Commit:** \`${{ github.sha }}\`\n` +
+              `**Workflow:** [View Full Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n` +
+              `### Commands Status:\n` +
+              `- \`terragrunt hcl validate\` ✅\n` +
+              `- \`terragrunt hcl validate --inputs\` ✅\n` +
+              `- \`terragrunt hcl format --check\` ${{ steps.format-validation.outputs.format_status == 'success' && '✅' || '❌' }}\n` +
+              `- \`terragrunt init\` ${{ steps.plan-validation.outcome != '' && '✅' || '⏸️' }}\n` +
+              `- \`terragrunt plan\` ${{ steps.plan-validation.outcome == 'success' && '✅' || steps.plan-validation.outcome == 'failure' && '❌' || '⏸️' }}\n\n` +
+              `### 📋 Resource ${actionTitle} Details\n\n` +
+              `| Resource Path | Status | Summary |\n` +
+              `|---------------|--------|---------|\n` +
+              `| \`${displayPath}\` | ${statusEmoji} ${status} | ${{ inputs.resource_emoji }} ${resourceDisplayName} configuration ${status === 'success' ? 'validated' : 'failed'} |\n\n` +
+              `### ${statusEmoji} ${actionTitle} Results:\n` +
+              (status === 'success' ?
+                `- ✅ **Format Check**: HCL formatting standards verified\n- ✅ **Syntax Validation**: HCL configuration and inputs validated\n- ✅ **Plan Validation**: Infrastructure changes planned successfully\n- 📋 **Ready for Review**: All validation steps completed without errors` :
+                `- ${{ steps.format-validation.outputs.format_status != 'success' && '❌ **Format Check Failed**: HCL formatting issues detected - fix formatting before proceeding' || '✅ **Format Check**: Passed' }}\n- ${{ steps.plan-validation.outcome == '' && '⏸️ **Plan Validation**: Skipped due to format check failure' || steps.plan-validation.outcome == 'failure' && '❌ **Plan Validation**: Failed - review configuration errors' || '✅ **Plan Validation**: Passed' }}\n- 🔧 **Action Required**: Review the workflow logs for detailed error information and fix issues`
+              ) + `\n\n` +
+              `### 📋 Next Steps:\n` +
+              (status === 'success' ?
+                `- ✅ **Format & Plan Validation Passed** - ready for review and merge\n- 🔀 **Merge this PR** to trigger automatic deployment\n- 📋 **Review planned changes** in the workflow artifacts` :
+                `${{ steps.format-validation.outputs.format_status != 'success' && '- 🎨 **Fix formatting issues** first using: \\`terragrunt hcl format\\`' || '' }}\n${{ steps.plan-validation.outcome == 'failure' && '- 🔧 **Fix configuration errors** identified in the plan validation' || '' }}\n- 🔍 **Check workflow logs** for detailed error messages\n- 🔄 **Push fixes** to re-trigger the two-step validation process`
+              ) + `\n\n` +
+              `**📦 Artifacts:** Detailed logs are available in the workflow run for comprehensive review.`;
+
+            // Find existing comment for this resource path
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes(commentIdentifier) ||
+              (comment.body.includes(displayPath) && comment.body.includes(`**${resourceDisplayName} ${actionTitle} Results**`))
+            );
+
+            console.log(`Looking for existing comment with identifier: ${commentIdentifier}`);
+            console.log(`Found ${comments.length} total comments`);
+            console.log(`Existing comment found: ${existingComment ? 'Yes (ID: ' + existingComment.id + ')' : 'No'}`);
+
+            if (existingComment) {
+              console.log(`Updating existing comment ID: ${existingComment.id}`);
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody
+              });
+              console.log(`Successfully updated comment ID: ${existingComment.id}`);
+            } else {
+              console.log(`Creating new comment for ${resourceDisplayName} ${actionTitle}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+              console.log(`Successfully created new comment`);
+            }

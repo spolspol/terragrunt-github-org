@@ -1,0 +1,541 @@
+name: GitHub Organization Apply Orchestrator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'live/**'
+      - '_common/**'
+      - 'root.hcl'
+  workflow_dispatch:
+    inputs:
+      target_resources:
+        description: 'Target resources to apply (optional - leave empty to auto-detect changes)'
+        required: false
+        type: choice
+        options:
+          - 'auto-detect'
+          - 'org-settings'
+          - 'members'
+          - 'teams'
+          - 'repositories'
+          - 'all'
+        default: 'auto-detect'
+
+jobs:
+  get-env:
+    name: 📋 Setup Common ENV
+    uses: ./.github/workflows/common-env.yml
+  detect-changes:
+    name: 🔍 Detect Resource Changes
+    runs-on: ubuntu-latest
+    needs: get-env
+    outputs:
+      has-org-settings: ${{ steps.detect.outputs.has-org-settings }}
+      has-members: ${{ steps.detect.outputs.has-members }}
+      has-teams: ${{ steps.detect.outputs.has-teams }}
+      has-repositories: ${{ steps.detect.outputs.has-repositories }}
+      org-settings-dirs: ${{ steps.detect.outputs.org-settings-dirs }}
+      members-dirs: ${{ steps.detect.outputs.members-dirs }}
+      teams-dirs: ${{ steps.detect.outputs.teams-dirs }}
+      repositories-dirs: ${{ steps.detect.outputs.repositories-dirs }}
+      needs-orchestration: ${{ steps.detect.outputs.needs-orchestration }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect resource changes
+        id: detect
+        run: |
+          set -e
+
+          # Get all changed files since the previous commit on main branch
+          # Use a safe approach that handles edge cases like first commits, force pushes, etc.
+          if git show-ref --verify --quiet refs/remotes/origin/main; then
+            # Compare against the previous commit on main
+            if [ "${{ github.sha }}" != "$(git rev-parse refs/remotes/origin/main)" ]; then
+              # Current commit is not the latest on main, compare with main
+              base_commit=$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || echo "refs/remotes/origin/main")
+            else
+              # Current commit is the latest on main, compare with previous commit
+              base_commit=$(git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+            fi
+          else
+            # Fallback to previous commit if main doesn't exist
+            base_commit=$(git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+          fi
+
+          echo "Base commit for comparison: $base_commit"
+          echo "Current commit: ${{ github.sha }}"
+
+          # Get changed files, fallback to all files if comparison fails
+          if ! changed_files=$(git diff --name-only "$base_commit" HEAD 2>/dev/null); then
+            echo "Warning: Could not compare with base commit, using all tracked files in live/ and _common/"
+            changed_files=$(find live/ _common/ -name "*.hcl" -type f 2>/dev/null || echo "")
+            [[ -f "root.hcl" ]] && changed_files="$changed_files"$'\n'"root.hcl"
+          fi
+
+          echo "Changed files:"
+          echo "$changed_files"
+
+          # Initialize detection flags
+          has_org_settings=false
+          has_members=false
+          has_teams=false
+          has_repositories=false
+
+          # Initialize directory arrays
+          org_settings_dirs=()
+          members_dirs=()
+          teams_dirs=()
+          repositories_dirs=()
+
+          # Count different resource types
+          resource_types=0
+
+          # Check for each resource type
+          if [[ -n "$changed_files" ]]; then
+            while IFS= read -r file; do
+              [[ -z "$file" ]] && continue
+              echo "Processing file: $file"
+
+              case "$file" in
+                live/org/*)
+                  echo "  -> Detected org-settings change"
+                  has_org_settings=true
+                  dir=$(dirname "$file")
+                  if [[ ! " ${org_settings_dirs[@]} " =~ " ${dir} " ]]; then
+                    org_settings_dirs+=("$dir")
+                    echo "  -> Added dir: $dir"
+                  fi
+                  ;;
+                live/org.hcl)
+                  echo "  -> Detected org-settings change (org config)"
+                  has_org_settings=true
+                  # For org.hcl, add the org directory
+                  dir="live/org"
+                  if [[ ! " ${org_settings_dirs[@]} " =~ " ${dir} " ]]; then
+                    org_settings_dirs+=("$dir")
+                    echo "  -> Added dir: $dir"
+                  fi
+                  ;;
+                live/members/*)
+                  echo "  -> Detected members change"
+                  has_members=true
+                  dir=$(dirname "$file")
+                  if [[ ! " ${members_dirs[@]} " =~ " ${dir} " ]]; then
+                    members_dirs+=("$dir")
+                    echo "  -> Added dir: $dir"
+                  fi
+                  ;;
+                live/teams/*)
+                  echo "  -> Detected teams change"
+                  has_teams=true
+                  dir=$(dirname "$file")
+                  if [[ ! " ${teams_dirs[@]} " =~ " ${dir} " ]]; then
+                    teams_dirs+=("$dir")
+                    echo "  -> Added dir: $dir"
+                  fi
+                  ;;
+                live/repositories/repos.hcl)
+                  echo "  -> Detected repositories config change (repos.hcl)"
+                  has_repositories=true
+                  # Find all actual repository directories with terragrunt.hcl files
+                  while IFS= read -r repo_dir; do
+                    if [[ ! " ${repositories_dirs[@]} " =~ " ${repo_dir} " ]]; then
+                      repositories_dirs+=("$repo_dir")
+                      echo "  -> Added repo dir: $repo_dir"
+                    fi
+                  done < <(find live/repositories -name "terragrunt.hcl" -type f -not -path "*/.terragrunt-cache/*" | xargs dirname | sort -u)
+                  ;;
+                live/repositories/*/*)
+                  echo "  -> Detected individual repository change"
+                  has_repositories=true
+                  # Extract the repository directory (two levels up from the file)
+                  dir=$(dirname "$file")
+                  # If it's a direct file in the repo directory, use that directory
+                  # If it's nested deeper, get the immediate subdirectory of live/repositories
+                  if [[ "$dir" == live/repositories/* ]]; then
+                    repo_dir=$(echo "$dir" | cut -d'/' -f1-3)
+                    if [[ -f "$repo_dir/terragrunt.hcl" ]]; then
+                      if [[ ! " ${repositories_dirs[@]} " =~ " ${repo_dir} " ]]; then
+                        repositories_dirs+=("$repo_dir")
+                        echo "  -> Added repo dir: $repo_dir"
+                      fi
+                    fi
+                  fi
+                  ;;
+                _common/*|root.hcl|live/org.hcl)
+                  echo "  -> Detected common file change - affects all resources"
+                  # Common files affect all resources
+                  has_org_settings=true
+                  has_members=true
+                  has_teams=true
+                  has_repositories=true
+
+                  # For repositories, we need to find actual terragrunt.hcl directories
+                  while IFS= read -r repo_dir; do
+                    if [[ ! " ${repositories_dirs[@]} " =~ " ${repo_dir} " ]]; then
+                      repositories_dirs+=("$repo_dir")
+                      echo "  -> Added repo dir (common change): $repo_dir"
+                    fi
+                  done < <(find live/repositories -name "terragrunt.hcl" -type f -not -path "*/.terragrunt-cache/*" | xargs dirname | sort -u)
+                  ;;
+                *)
+                  echo "  -> No match for resource detection"
+                  ;;
+              esac
+            done <<< "$changed_files"
+          fi
+
+          # Count resource types for orchestration decision
+          resource_types=0
+          [[ "$has_org_settings" == "true" ]] && resource_types=$((resource_types + 1))
+          [[ "$has_members" == "true" ]] && resource_types=$((resource_types + 1))
+          [[ "$has_teams" == "true" ]] && resource_types=$((resource_types + 1))
+          [[ "$has_repositories" == "true" ]] && resource_types=$((resource_types + 1))
+
+          # Determine if orchestration is needed (more than one resource type)
+          if [[ $resource_types -gt 1 ]]; then
+            needs_orchestration="true"
+          else
+            needs_orchestration="false"
+          fi
+
+          # Convert arrays to JSON using simple approach
+          org_settings_json="[]"
+          if [ ${#org_settings_dirs[@]} -gt 0 ]; then
+            org_settings_json="["
+            for i in "${!org_settings_dirs[@]}"; do
+              if [ $i -gt 0 ]; then
+                org_settings_json+=","
+              fi
+              org_settings_json+="\"${org_settings_dirs[$i]}\""
+            done
+            org_settings_json+="]"
+          fi
+
+          members_json="[]"
+          if [ ${#members_dirs[@]} -gt 0 ]; then
+            members_json="["
+            for i in "${!members_dirs[@]}"; do
+              if [ $i -gt 0 ]; then
+                members_json+=","
+              fi
+              members_json+="\"${members_dirs[$i]}\""
+            done
+            members_json+="]"
+          fi
+
+          teams_json="[]"
+          if [ ${#teams_dirs[@]} -gt 0 ]; then
+            teams_json="["
+            for i in "${!teams_dirs[@]}"; do
+              if [ $i -gt 0 ]; then
+                teams_json+=","
+              fi
+              teams_json+="\"${teams_dirs[$i]}\""
+            done
+            teams_json+="]"
+          fi
+
+          repositories_json="[]"
+          if [ ${#repositories_dirs[@]} -gt 0 ]; then
+            repositories_json="["
+            for i in "${!repositories_dirs[@]}"; do
+              if [ $i -gt 0 ]; then
+                repositories_json+=","
+              fi
+              repositories_json+="\"${repositories_dirs[$i]}\""
+            done
+            repositories_json+="]"
+          fi
+
+          # Output results
+          echo "has-org-settings=$has_org_settings" >> $GITHUB_OUTPUT
+          echo "has-members=$has_members" >> $GITHUB_OUTPUT
+          echo "has-teams=$has_teams" >> $GITHUB_OUTPUT
+          echo "has-repositories=$has_repositories" >> $GITHUB_OUTPUT
+          echo "org-settings-dirs=$org_settings_json" >> $GITHUB_OUTPUT
+          echo "members-dirs=$members_json" >> $GITHUB_OUTPUT
+          echo "teams-dirs=$teams_json" >> $GITHUB_OUTPUT
+          echo "repositories-dirs=$repositories_json" >> $GITHUB_OUTPUT
+          echo "needs-orchestration=$needs_orchestration" >> $GITHUB_OUTPUT
+
+          echo "Resource types changed: $resource_types"
+          echo "Needs orchestration: $needs_orchestration"
+
+  apply-org-settings:
+    name: 🏢 Apply Org Settings
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-org-settings == 'true'
+    uses: ./.github/workflows/terragrunt-unified-reusable.yml
+    with:
+      mode: 'apply'
+      resource_type: 'org-settings'
+      resource_paths: ${{ needs.detect-changes.outputs.org-settings-dirs }}
+      resource_emoji: '🏢'
+      requires_approval: true
+    secrets:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+
+  apply-members:
+    name: 👥 Apply Members
+    needs: [detect-changes, apply-org-settings]
+    if: needs.detect-changes.outputs.has-members == 'true' && (always() && !failure())
+    uses: ./.github/workflows/terragrunt-unified-reusable.yml
+    with:
+      mode: 'apply'
+      resource_type: 'members'
+      resource_paths: ${{ needs.detect-changes.outputs.members-dirs }}
+      resource_emoji: '👥'
+      requires_approval: true
+    secrets:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+
+  apply-teams:
+    name: 🏗️ Apply Teams
+    needs: [detect-changes, apply-members]
+    if: needs.detect-changes.outputs.has-teams == 'true' && (always() && !failure())
+    uses: ./.github/workflows/terragrunt-unified-reusable.yml
+    with:
+      mode: 'apply'
+      resource_type: 'teams'
+      resource_paths: ${{ needs.detect-changes.outputs.teams-dirs }}
+      resource_emoji: '🏗️'
+      requires_approval: true
+    secrets:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+
+  apply-repositories:
+    name: 📦 Apply Repositories
+    needs: [detect-changes, apply-teams]
+    if: needs.detect-changes.outputs.has-repositories == 'true' && (always() && !failure())
+    uses: ./.github/workflows/terragrunt-unified-reusable.yml
+    with:
+      mode: 'apply'
+      resource_type: 'repositories'
+      resource_paths: ${{ needs.detect-changes.outputs.repositories-dirs }}
+      resource_emoji: '📦'
+      requires_approval: true
+    secrets:
+      ORG_GITHUB_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+      TF_GOOGLE_CREDENTIALS: ${{ secrets.TF_GOOGLE_CREDENTIALS }}
+
+  deployment-summary:
+    name: 📋 Deployment Summary
+    needs: [detect-changes, apply-org-settings, apply-members, apply-teams, apply-repositories]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          # Collect job results
+          ORG_RESULT="${{ needs.apply-org-settings.result }}"
+          MEMBERS_RESULT="${{ needs.apply-members.result }}"
+          TEAMS_RESULT="${{ needs.apply-teams.result }}"
+          REPOS_RESULT="${{ needs.apply-repositories.result }}"
+
+          # Check which resources have changes
+          HAS_ORG="${{ needs.detect-changes.outputs.has-org-settings }}"
+          HAS_MEMBERS="${{ needs.detect-changes.outputs.has-members }}"
+          HAS_TEAMS="${{ needs.detect-changes.outputs.has-teams }}"
+          HAS_REPOS="${{ needs.detect-changes.outputs.has-repositories }}"
+
+          # Determine overall status
+          OVERALL_STATUS="success"
+          FAILED_JOBS=()
+          SUCCESS_JOBS=()
+          SKIPPED_JOBS=()
+
+          # Evaluate each job that was supposed to run
+          if [ "$HAS_ORG" == "true" ]; then
+            if [ "$ORG_RESULT" == "failure" ]; then
+              FAILED_JOBS+=("org-settings")
+              OVERALL_STATUS="failure"
+            elif [ "$ORG_RESULT" == "success" ]; then
+              SUCCESS_JOBS+=("org-settings")
+            else
+              SKIPPED_JOBS+=("org-settings")
+            fi
+          fi
+
+          if [ "$HAS_MEMBERS" == "true" ]; then
+            if [ "$MEMBERS_RESULT" == "failure" ]; then
+              FAILED_JOBS+=("members")
+              OVERALL_STATUS="failure"
+            elif [ "$MEMBERS_RESULT" == "success" ]; then
+              SUCCESS_JOBS+=("members")
+            else
+              SKIPPED_JOBS+=("members")
+            fi
+          fi
+
+          if [ "$HAS_TEAMS" == "true" ]; then
+            if [ "$TEAMS_RESULT" == "failure" ]; then
+              FAILED_JOBS+=("teams")
+              OVERALL_STATUS="failure"
+            elif [ "$TEAMS_RESULT" == "success" ]; then
+              SUCCESS_JOBS+=("teams")
+            else
+              SKIPPED_JOBS+=("teams")
+            fi
+          fi
+
+          if [ "$HAS_REPOS" == "true" ]; then
+            if [ "$REPOS_RESULT" == "failure" ]; then
+              FAILED_JOBS+=("repositories")
+              OVERALL_STATUS="failure"
+            elif [ "$REPOS_RESULT" == "success" ]; then
+              SUCCESS_JOBS+=("repositories")
+            else
+              SKIPPED_JOBS+=("repositories")
+            fi
+          fi
+
+          # Prepare summary details
+          if [ "$OVERALL_STATUS" == "success" ]; then
+            STATUS_ICON="✅"
+            STATUS_COLOR="🟢"
+            STATUS_TEXT="ALL DEPLOYMENTS SUCCESSFUL"
+          else
+            STATUS_ICON="❌"
+            STATUS_COLOR="🔴"
+            STATUS_TEXT="DEPLOYMENT FAILED"
+          fi
+
+          echo "# 🚀 GitHub Organization Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${STATUS_COLOR} **Status: ${STATUS_TEXT}** ${STATUS_ICON}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📅 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow:** [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Show execution results in dependency order
+          echo "### 🔄 Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Resource Type | Status | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Check each resource in dependency order
+          STEP_NUM=1
+          for resource_type in "org-settings" "members" "teams" "repositories"; do
+            case "$resource_type" in
+              "org-settings")
+                HAS_CHANGES="$HAS_ORG"
+                RESULT="$ORG_RESULT"
+                EMOJI="🏢"
+                DISPLAY="Organization Settings"
+                ;;
+              "members")
+                HAS_CHANGES="$HAS_MEMBERS"
+                RESULT="$MEMBERS_RESULT"
+                EMOJI="👥"
+                DISPLAY="Members"
+                ;;
+              "teams")
+                HAS_CHANGES="$HAS_TEAMS"
+                RESULT="$TEAMS_RESULT"
+                EMOJI="🏗️"
+                DISPLAY="Teams"
+                ;;
+              "repositories")
+                HAS_CHANGES="$HAS_REPOS"
+                RESULT="$REPOS_RESULT"
+                EMOJI="📦"
+                DISPLAY="Repositories"
+                ;;
+            esac
+
+            # Only show resources that have changes
+            if [ "$HAS_CHANGES" == "true" ]; then
+              if [ "$RESULT" == "success" ]; then
+                STATUS_EMOJI="✅"
+                STATUS_TEXT="DEPLOYED"
+              elif [ "$RESULT" == "failure" ]; then
+                STATUS_EMOJI="❌"
+                STATUS_TEXT="FAILED"
+              elif [ "$RESULT" == "skipped" ]; then
+                STATUS_EMOJI="⏸️"
+                STATUS_TEXT="SKIPPED"
+              else
+                STATUS_EMOJI="⏸️"
+                STATUS_TEXT="NOT RUN"
+              fi
+
+              echo "| $STEP_NUM | $EMOJI $DISPLAY | $STATUS_EMOJI $STATUS_TEXT | $RESULT |" >> $GITHUB_STEP_SUMMARY
+              STEP_NUM=$((STEP_NUM + 1))
+            fi
+          done
+
+          # Add summary sections
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$OVERALL_STATUS" == "success" ]; then
+            echo "### 🎉 Deployment Success" >> $GITHUB_STEP_SUMMARY
+            echo "- **✅ All organization changes deployed successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "- **🔄 Dependency order respected** - Resources deployed in correct sequence" >> $GITHUB_STEP_SUMMARY
+            echo "- **📊 GitHub organization infrastructure** updated and operational" >> $GITHUB_STEP_SUMMARY
+            echo "- **🔍 Review deployment logs** for detailed information about each resource" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### 🚨 Deployment Failure" >> $GITHUB_STEP_SUMMARY
+            echo "- **❌ Orchestrated deployment failed** - One or more jobs failed or were skipped" >> $GITHUB_STEP_SUMMARY
+            if [ ${#FAILED_JOBS[@]} -gt 0 ]; then
+              FAILED_LIST=$(IFS=,; echo "${FAILED_JOBS[*]}")
+              echo "- **🚫 Failed jobs:** $FAILED_LIST - Review errors in these resource types" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ ${#SKIPPED_JOBS[@]} -gt 0 ]; then
+              SKIPPED_LIST=$(IFS=,; echo "${SKIPPED_JOBS[*]}")
+              echo "- **⏸️ Skipped jobs:** $SKIPPED_LIST - These jobs were skipped due to failures" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "- **🔍 Review workflow logs** for complete error information" >> $GITHUB_STEP_SUMMARY
+            echo "- **🔧 Fix configuration issues** and retry deployment" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Deployment Order" >> $GITHUB_STEP_SUMMARY
+          echo "Organization resources are deployed in dependency order:" >> $GITHUB_STEP_SUMMARY
+          echo "1. **🏢 Organization Settings** - Foundation configuration" >> $GITHUB_STEP_SUMMARY
+          echo "2. **👥 Members** - User management (depends on organization)" >> $GITHUB_STEP_SUMMARY
+          echo "3. **🏗️ Teams** - Team structure (depends on members)" >> $GITHUB_STEP_SUMMARY
+          echo "4. **📦 Repositories** - Repository setup (depends on teams)" >> $GITHUB_STEP_SUMMARY
+
+          # Post summary to workflow level using workflow commands
+          echo "::notice title=Deployment Summary::${STATUS_TEXT} - View step summary for detailed results"
+
+          # Create a condensed summary for workflow annotations
+          SUMMARY_TEXT="Deployment Status: ${STATUS_TEXT}"
+          if [ ${#SUCCESS_JOBS[@]} -gt 0 ]; then
+            SUCCESS_LIST=$(IFS=,; echo "${SUCCESS_JOBS[*]}")
+            SUMMARY_TEXT="${SUMMARY_TEXT} | Success: ${SUCCESS_LIST}"
+          fi
+          if [ ${#FAILED_JOBS[@]} -gt 0 ]; then
+            FAILED_LIST=$(IFS=,; echo "${FAILED_JOBS[*]}")
+            SUMMARY_TEXT="${SUMMARY_TEXT} | Failed: ${FAILED_LIST}"
+          fi
+          if [ ${#SKIPPED_JOBS[@]} -gt 0 ]; then
+            SKIPPED_LIST=$(IFS=,; echo "${SKIPPED_JOBS[*]}")
+            SUMMARY_TEXT="${SUMMARY_TEXT} | Skipped: ${SKIPPED_LIST}"
+          fi
+
+          # Set the workflow title with status
+          if [ "$OVERALL_STATUS" == "failure" ]; then
+            echo "::error title=Deployment Failed::${SUMMARY_TEXT}"
+            exit 1
+          else
+            echo "::notice title=Deployment Successful::${SUMMARY_TEXT}"
+          fi

@@ -1,0 +1,59 @@
+name: Setup Common Environment
+
+on:
+  workflow_call:
+    outputs:
+      terragrunt_version:
+        description: 'Terragrunt version to use'
+        value: ${{ jobs.set-env.outputs.terragrunt_version }}
+      tofu_version:
+        description: 'OpenTofu version to use'
+        value: ${{ jobs.set-env.outputs.tofu_version }}
+      tg_experiment_mode:
+        description: 'Terragrunt experiment mode'
+        value: ${{ jobs.set-env.outputs.tg_experiment_mode }}
+      gcp_project_id:
+        description: 'GCP Project ID'
+        value: ${{ jobs.set-env.outputs.gcp_project_id }}
+      gcp_region:
+        description: 'GCP Region'
+        value: ${{ jobs.set-env.outputs.gcp_region }}
+
+env:
+  # Tool Versions - Single source of truth
+  TERRAGRUNT_VERSION: '0.80.4'
+  TOFU_VERSION: '1.10.0-beta2'
+
+  # Terragrunt Configuration
+  TG_EXPERIMENT_MODE: 'true'
+
+  # Cloud Configuration - UPDATE THESE VALUES FOR YOUR ORGANIZATION
+  # GCP Configuration (if using GCS backend)
+  GCP_PROJECT_ID: 'your-gcp-project-id'
+  GCP_REGION: 'your-gcp-region'
+
+jobs:
+  set-env:
+    name: 📋 Get ENV
+    runs-on: ubuntu-latest
+    outputs:
+      terragrunt_version: ${{ env.TERRAGRUNT_VERSION }}
+      tofu_version: ${{ env.TOFU_VERSION }}
+      tg_experiment_mode: ${{ env.TG_EXPERIMENT_MODE }}
+      gcp_project_id: ${{ env.GCP_PROJECT_ID }}
+      gcp_region: ${{ env.GCP_REGION }}
+    steps:
+      - name: Display environment variables
+        run: |
+          echo "🔧 Common Environment Variables:"
+          echo ""
+          echo "📦 Tool Versions:"
+          echo "  TERRAGRUNT_VERSION=${{ env.TERRAGRUNT_VERSION }}"
+          echo "  TOFU_VERSION=${{ env.TOFU_VERSION }}"
+          echo ""
+          echo "⚙️  Terragrunt Configuration:"
+          echo "  TG_EXPERIMENT_MODE=${{ env.TG_EXPERIMENT_MODE }}"
+          echo ""
+          echo "☁️  Cloud Configuration:"
+          echo "  GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}"
+          echo "  GCP_REGION=${{ env.GCP_REGION }}"
